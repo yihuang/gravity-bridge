@@ -1,5 +1,2 @@
-go-gravity-bridge:
-  language: go
-
 rust-gravity-bridge:
   language: rust
