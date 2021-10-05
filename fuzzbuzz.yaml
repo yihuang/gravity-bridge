@@ -1,2 +1,3 @@
 rust-gravity-bridge:
   language: rust
+  root: ./orchestrator
