@@ -1,3 +1,4 @@
+use crate::fee_manager::FeeManager;
 use cosmos_gravity::query::get_latest_transaction_batches;
 use cosmos_gravity::query::get_transaction_batch_signatures;
 use ethereum_gravity::{
@@ -37,6 +38,7 @@ pub async fn relay_batches(
     gravity_id: String,
     timeout: Duration,
     eth_gas_price_multiplier: f32,
+    fee_manager: &mut FeeManager,
 ) {
     let possible_batches =
         get_batches_and_signatures(current_valset.clone(), grpc_client, gravity_id.clone()).await;
@@ -51,6 +53,7 @@ pub async fn relay_batches(
         timeout,
         eth_gas_price_multiplier,
         possible_batches,
+        fee_manager,
     )
     .await;
 }
@@ -133,6 +136,7 @@ async fn submit_batches(
     timeout: Duration,
     eth_gas_price_multiplier: f32,
     possible_batches: HashMap<EthAddress, Vec<SubmittableBatch>>,
+    fee_manager: &mut FeeManager,
 ) {
     let ethereum_block_height = if let Ok(bn) = eth_client.get_block_number().await {
         bn
@@ -199,30 +203,45 @@ async fn submit_batches(
                 let total_cost = total_cost.unwrap();
                 let gas_price_as_f32 = downcast_to_f32(cost.gas_price).unwrap(); // if the total cost isn't greater, this isn't
 
-                info!(
-                    "We have detected latest batch {} but latest on Ethereum is {} This batch is estimated to cost {} Gas / {:.4} ETH to submit",
-                    latest_cosmos_batch_nonce,
-                    latest_ethereum_batch,
-                    cost.gas_price.clone(),
-                    total_cost / one_eth_f32()
-                );
+                if fee_manager
+                    .can_send_batch(
+                        &cost,
+                        &oldest_signed_batch.total_fee,
+                        &oldest_signed_batch.token_contract,
+                    )
+                    .await
+                {
+                    let token_contract = oldest_signed_batch.token_contract;
 
-                cost.gas_price = ((gas_price_as_f32 * eth_gas_price_multiplier) as u128).into();
+                    info!(
+                        "We have detected latest batch {} but latest on Ethereum is {} This batch is estimated to cost {} Gas / {:.4} ETH to submit",
+                        latest_cosmos_batch_nonce,
+                        latest_ethereum_batch,
+                        cost.gas_price.clone(),
+                        total_cost / one_eth_f32()
+                    );
 
-                let res = send_eth_transaction_batch(
-                    current_valset.clone(),
-                    oldest_signed_batch,
-                    &oldest_signatures,
-                    timeout,
-                    gravity_contract_address,
-                    gravity_id.clone(),
-                    cost,
-                    eth_client.clone(),
-                )
-                .await;
+                    cost.gas_price = ((gas_price_as_f32 as u128 * eth_gas_price_multiplier as u128)
+                        as u128)
+                        .into();
 
-                if res.is_err() {
-                    warn!("Batch submission failed with {:?}", res);
+                    let res = send_eth_transaction_batch(
+                        current_valset.clone(),
+                        oldest_signed_batch,
+                        &oldest_signatures,
+                        timeout,
+                        gravity_contract_address,
+                        gravity_id.clone(),
+                        cost,
+                        eth_client.clone(),
+                    )
+                    .await;
+
+                    if res.is_err() {
+                        warn!("Batch submission failed with {:?}", res);
+                    } else {
+                        fee_manager.update_next_batch_send_time(token_contract)
+                    }
                 }
             }
         }

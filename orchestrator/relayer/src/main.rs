@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::fee_manager::FeeManager;
 use crate::main_loop::relayer_main_loop;
 use crate::main_loop::LOOP_SPEED;
 use docopt::Docopt;
@@ -7,12 +8,14 @@ use env_logger::Env;
 use ethers::prelude::*;
 use ethers::signers::LocalWallet as EthWallet;
 use ethers::types::Address as EthAddress;
+use gravity_utils::types::config::RelayerMode;
 use gravity_utils::{
     connection_prep::{check_for_eth, create_rpc_connections, wait_for_cosmos_node_ready},
     ethereum::{downcast_to_u64, format_eth_address},
 };
 
 pub mod batch_relaying;
+pub mod fee_manager;
 pub mod find_latest_valset;
 pub mod logic_call_relaying;
 pub mod main_loop;
@@ -32,11 +35,12 @@ struct Args {
     flag_address_prefix: String,
     flag_ethereum_rpc: String,
     flag_contract_address: String,
+    flag_mode: RelayerMode,
 }
 
 lazy_static! {
     pub static ref USAGE: String = format!(
-    "Usage: {} --ethereum-key=<key> --cosmos-grpc=<url> --address-prefix=<prefix> --ethereum-rpc=<url> --contract-address=<addr>
+    "Usage: {} --ethereum-key=<key> --cosmos-grpc=<url> --address-prefix=<prefix> --ethereum-rpc=<url> --contract-address=<addr> --mode=<mode>
         Options:
             -h --help                    Show this screen.
             --ethereum-key=<ekey>        An Ethereum private key containing non-trivial funds
@@ -44,6 +48,7 @@ lazy_static! {
             --address-prefix=<prefix>    The prefix for addresses on this Cosmos chain
             --ethereum-grpc=<eurl>       The Ethereum RPC url, Geth light clients work and sync fast
             --contract-address=<addr>    The Ethereum contract address for Gravity
+            --mode=<mode>                The relayer mode, valid values are : AlwaysRelay, Api, File
         About:
             The Gravity relayer component, responsible for relaying data from the Cosmos blockchain
             to the Ethereum blockchain, cosmos key and fees are optional since they are only used
@@ -75,6 +80,8 @@ async fn main() {
         .flag_contract_address
         .parse()
         .expect("Invalid contract address!");
+    let mode = args.flag_mode;
+    info!("Relayer using mode: {:?}", mode);
 
     let connections = create_rpc_connections(
         args.flag_address_prefix,
@@ -105,11 +112,13 @@ async fn main() {
     wait_for_cosmos_node_ready(&contact).await;
     check_for_eth(public_eth_key, eth_client.clone()).await;
 
+    let mut fee_manager = FeeManager::new_fee_manager(mode).await.unwrap();
     relayer_main_loop(
         eth_client,
         connections.grpc.unwrap(),
         gravity_contract_address,
         1f32,
+        &mut fee_manager,
     )
     .await
 }

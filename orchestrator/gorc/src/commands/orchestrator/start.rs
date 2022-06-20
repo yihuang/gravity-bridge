@@ -1,6 +1,7 @@
 use crate::{application::APP, prelude::*};
 use abscissa_core::{clap::Parser, Command, Runnable};
 use ethers::{prelude::*, types::Address as EthAddress};
+use gravity_utils::types::config::RelayerMode;
 use gravity_utils::{
     connection_prep::{
         check_delegate_addresses, check_for_eth, check_for_fee_denom, create_rpc_connections,
@@ -12,6 +13,7 @@ use orchestrator::main_loop::{
     orchestrator_main_loop, ETH_ORACLE_LOOP_SPEED, ETH_SIGNER_LOOP_SPEED,
 };
 use relayer::main_loop::LOOP_SPEED as RELAYER_LOOP_SPEED;
+use std::str::FromStr;
 use std::{cmp::min, sync::Arc};
 
 /// Start the Orchestrator
@@ -25,6 +27,9 @@ pub struct StartCommand {
 
     #[clap(short, long)]
     orchestrator_only: bool,
+
+    #[clap(short, long)]
+    mode: Option<String>,
 }
 
 impl Runnable for StartCommand {
@@ -99,6 +104,11 @@ impl Runnable for StartCommand {
 
             let gas_price = config.cosmos.gas_price.as_tuple();
 
+            let mode_str = self.mode.as_deref().unwrap_or("Api");
+            let mode = RelayerMode::from_str(mode_str)
+                .expect("Incorrect mode, possible value are: AlwaysRelay, Api or File");
+            info!("Relayer using mode {:?}", mode);
+
             orchestrator_main_loop(
                 cosmos_key,
                 contact,
@@ -112,6 +122,7 @@ impl Runnable for StartCommand {
                 config.cosmos.gas_adjustment,
                 self.orchestrator_only,
                 config.cosmos.msg_batch_size,
+                mode,
             )
             .await;
         })

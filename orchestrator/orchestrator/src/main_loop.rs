@@ -9,6 +9,7 @@ use crate::{
     ethereum_event_watcher::check_for_events, metrics::metrics_main_loop,
     oracle_resync::get_last_checked_block,
 };
+use cosmos_gravity::crypto::PrivateKey as CosmosPrivateKey;
 use cosmos_gravity::send::send_main_loop;
 use cosmos_gravity::{
     build,
@@ -19,13 +20,14 @@ use cosmos_gravity::{
 };
 use deep_space::client::ChainStatus;
 use deep_space::error::CosmosGrpcError;
-use cosmos_gravity::crypto::PrivateKey as CosmosPrivateKey;
 use deep_space::{Contact, Msg};
 use ethereum_gravity::types::EthClient;
 use ethereum_gravity::utils::get_gravity_id;
 use ethers::{prelude::*, types::Address as EthAddress};
 use gravity_proto::gravity::query_client::QueryClient as GravityQueryClient;
 use gravity_utils::ethereum::bytes_to_hex_str;
+use gravity_utils::types::config::RelayerMode;
+use relayer::fee_manager::FeeManager;
 use relayer::main_loop::relayer_main_loop;
 use std::convert::TryInto;
 use std::process::exit;
@@ -59,6 +61,7 @@ pub async fn orchestrator_main_loop(
     gas_adjustment: f64,
     relayer_opt_out: bool,
     cosmos_msg_batch_size: u32,
+    mode: RelayerMode,
 ) {
     let (tx, rx) = tokio::sync::mpsc::channel(1);
 
@@ -93,11 +96,14 @@ pub async fn orchestrator_main_loop(
     let d = metrics_main_loop(metrics_listen);
 
     if !relayer_opt_out {
+        let mut fee_manager = FeeManager::new_fee_manager(mode).await.unwrap();
+
         let e = relayer_main_loop(
             eth_client.clone(),
             grpc_client.clone(),
             gravity_contract_address,
             eth_gas_price_multiplier,
+            &mut fee_manager,
         );
         futures::future::join5(a, b, c, d, e).await;
     } else {
@@ -169,7 +175,8 @@ pub async fn eth_oracle_main_loop(
                                 &contact,
                                 cosmos_key,
                                 latest_eth_block - block_delay,
-                            ).await;
+                            )
+                            .await;
 
                             msg_sender
                                 .send(messages)

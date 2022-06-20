@@ -1,11 +1,12 @@
+use crate::fee_manager::FeeManager;
 use crate::{
     batch_relaying::relay_batches, find_latest_valset::find_latest_valset,
-    logic_call_relaying::{relay_logic_calls}, valset_relaying::relay_valsets,
+    logic_call_relaying::relay_logic_calls, valset_relaying::relay_valsets,
 };
-use ethereum_gravity::{types::EthClient, utils::get_gravity_id, logic_call::LogicCallSkips};
+use ethereum_gravity::{logic_call::LogicCallSkips, types::EthClient, utils::get_gravity_id};
 use ethers::types::Address as EthAddress;
 use gravity_proto::gravity::query_client::QueryClient as GravityQueryClient;
-use std::{time::Duration};
+use std::time::Duration;
 use tonic::transport::Channel;
 
 pub const LOOP_SPEED: Duration = Duration::from_secs(17);
@@ -18,8 +19,10 @@ pub async fn relayer_main_loop(
     grpc_client: GravityQueryClient<Channel>,
     gravity_contract_address: EthAddress,
     eth_gas_price_multiplier: f32,
+    fee_manager: &mut FeeManager,
 ) {
     let mut grpc_client = grpc_client;
+
     let gravity_id = get_gravity_id(gravity_contract_address, eth_client.clone()).await;
     if gravity_id.is_err() {
         error!("Failed to get GravityID, check your Eth node");
@@ -61,6 +64,7 @@ pub async fn relayer_main_loop(
                     gravity_id.clone(),
                     LOOP_SPEED,
                     eth_gas_price_multiplier,
+                    fee_manager,
                 )
                 .await;
 
