@@ -3,6 +3,8 @@ use crate::{
     error::GravityError,
     ethereum::{format_eth_address, u8_slice_to_fixed_32},
 };
+use bitcoin::hashes::hex::ToHex;
+use checksum;
 use deep_space::error::CosmosGrpcError;
 use ethers::types::{Address as EthAddress, Signature as EthSignature};
 use std::convert::TryFrom;
@@ -339,7 +341,13 @@ impl Ord for ValsetMember {
         if self.power != other.power {
             self.power.cmp(&other.power)
         } else {
-            self.eth_address.cmp(&other.eth_address).reverse()
+            // Since gravity-bridge uses checksum addresses
+            // we need to convert in order to do the comparison.
+            let checksum_addr = checksum::checksum(
+                &self.eth_address.unwrap_or_default().to_hex());
+            let checksum_other = checksum::checksum(
+                &other.eth_address.unwrap_or_default().to_hex());
+            checksum_addr.cmp(&checksum_other).reverse()
         }
     }
 }
