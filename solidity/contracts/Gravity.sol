@@ -62,6 +62,14 @@ struct ValSignature {
 	bytes32 s;
 }
 
+struct TransferReverted {
+	address tokenContract;
+	address destination;
+	uint256 amount;
+	bool activate;
+}
+
+
 contract Gravity is ReentrancyGuard {
 	using SafeMath for uint256;
 	using SafeERC20 for IERC20;
@@ -79,6 +87,10 @@ contract Gravity is ReentrancyGuard {
 	uint256 public state_powerThreshold;
 	// This is set once at initialization
 	bytes32 public immutable state_gravityId;
+
+	// Store vouchers for reverted cases
+	mapping(uint256 => TransferReverted) public state_RevertedVouchers;
+	uint256 public state_lastRevertedNonce = 1;
 
 	// TransactionBatchExecutedEvent and SendToCosmosEvent both include the field _eventNonce.
 	// This is incremented every time one of these events is emitted. It is checked by the
@@ -121,6 +133,11 @@ contract Gravity is ReentrancyGuard {
 		bytes _returnData,
 		uint256 _eventNonce
 	);
+
+	modifier onlySelf {
+		require(msg.sender == address(this), "Can only be invoked by contract");
+		_;
+	}
 
 	// TEST FIXTURES
 	// These are here to make it easier to measure gas usage. They should be removed before production
@@ -246,7 +263,7 @@ contract Gravity is ReentrancyGuard {
 	// generated from the new valset.
 	// Anyone can call this function, but they must supply valid signatures of state_powerThreshold of the current valset over
 	// the new valset.
-function updateValset(
+    function updateValset(
 		// The new version of the validator set
 		ValsetArgs calldata _newValset,
 		// The current validators that approve the change
@@ -425,21 +442,45 @@ function updateValset(
 				// Send transaction amounts to destinations
 				uint256 totalFee;
 				for (uint256 i = 0; i < _amounts.length; i++) {
-					IERC20(_tokenContract).safeTransfer(_destinations[i], _amounts[i]);
+					transferNoRevert(_tokenContract, _destinations[i], _amounts[i]);
 					totalFee = totalFee + _fees[i];
 				}
 
 				// Send transaction fees to msg.sender
-				IERC20(_tokenContract).safeTransfer(msg.sender, totalFee);
+				transferNoRevert(_tokenContract, msg.sender, totalFee);
 			}
 		}
-
 		// LOGS scoped to reduce stack depth
 		{
 			state_lastEventNonce = state_lastEventNonce + 1;
 			emit TransactionBatchExecutedEvent(_batchNonce, _tokenContract, state_lastEventNonce);
 		}
-	}	
+	}
+
+	function transferNoRevert(address token, address to, uint value) internal {
+		try this.safeTransferSelf(token,to, value) {
+		} catch {
+			state_RevertedVouchers[state_lastRevertedNonce] = TransferReverted(token, to, value, true);
+			state_lastRevertedNonce = state_lastRevertedNonce + 1;
+		}
+	}
+
+	function safeTransferSelf(address token, address to, uint value) public onlySelf {
+		IERC20(token).safeTransfer(to, value);
+	}
+
+	function redeemVoucher(
+		uint256 _nonce,
+		address _newDestination
+	) public nonReentrant {
+		if(state_RevertedVouchers[_nonce].activate){
+			TransferReverted memory voucher = state_RevertedVouchers[_nonce];
+			require(voucher.destination == msg.sender, "Can only be redeemed by intended recipient");
+			state_RevertedVouchers[_nonce].activate = false;
+			state_RevertedVouchers[_nonce].amount = 0;
+			IERC20(voucher.tokenContract).safeTransfer(_newDestination, voucher.amount);
+		}
+	}
 
 	// This makes calls to contracts that execute arbitrary logic
 	// First, it gives the logic contract some tokens
