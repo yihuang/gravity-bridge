@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "./Gravity.sol";
+import "./ICosmosToken.sol";
 
 pragma experimental ABIEncoderV2;
 
@@ -22,7 +23,14 @@ contract CronosGravity is Gravity, AccessControl, Pausable, Ownable {
 
     bool public anyoneCanRelay;
 
+    // Timelock variable for the migration
+    bool public migration;
+    uint256 public migrationHeight;
+    // Migration period is 3 days
+    uint256 public constant MIGRATION_PERIOD = 21600;
+
     event AnyoneCanRelay(bool anyoneCanRelay);
+    event Migration(bool migration);
 
     modifier checkWhiteList() {
         if (!anyoneCanRelay) {
@@ -72,15 +80,44 @@ contract CronosGravity is Gravity, AccessControl, Pausable, Ownable {
 
     /**
     * Only owner
+    * Notify the start of the migration
+    */
+    function startMigration() public onlyOwner {
+        migrationHeight = block.number + MIGRATION_PERIOD;
+        migration = true;
+        emit Migration(true);
+    }
+
+    /**
+    * Only owner
+    * Stop the migration
+    */
+    function stopMigration() public onlyOwner {
+        migrationHeight = 0;
+        migration = false;
+        emit Migration(false);
+    }
+
+    /**
+    * Only owner
     * migrateToken allows to migrate locked fund to a new gravity contract
     * in case we need to upgrade it
     */
     function migrateToken(
         address _tokenContract,
-        address _destination,
-        uint256 _amount
+        address _newGravityAddress,
+        uint256 _amount,
+        bool isCosmosToken
     ) public onlyOwner {
-        IERC20(_tokenContract).safeTransfer(_destination, _amount);
+        require(migration == true, "Migration has not started");
+        require(migrationHeight != 0, "Migration height cannot be zero");
+        require(block.number >= migrationHeight, "Migration is not allowed yet");
+        require(block.number <= migrationHeight + MIGRATION_PERIOD, "Migration time has exceeded");
+        if (isCosmosToken) {
+            ICosmosToken(_tokenContract).setGravityContract(_newGravityAddress);
+        } else {
+            IERC20(_tokenContract).safeTransfer(_newGravityAddress, _amount);
+        }
     }
 
     // Pausable functionalities:
