@@ -4,6 +4,7 @@ use crate::{
     logic_call_relaying::relay_logic_calls, valset_relaying::relay_valsets,
 };
 use ethereum_gravity::{logic_call::LogicCallSkips, types::EthClient, utils::get_gravity_id};
+use ethers::signers::Signer;
 use ethers::types::Address as EthAddress;
 use gravity_proto::gravity::query_client::QueryClient as GravityQueryClient;
 use std::time::Duration;
@@ -15,8 +16,8 @@ pub const PENDING_TX_TIMEOUT: Duration = Duration::from_secs(120);
 /// This function contains the orchestrator primary loop, it is broken out of the main loop so that
 /// it can be called in the test runner for easier orchestration of multi-node tests
 #[allow(unused_variables)]
-pub async fn relayer_main_loop(
-    eth_client: EthClient,
+pub async fn relayer_main_loop<S: Signer + 'static>(
+    eth_client: EthClient<S>,
     grpc_client: GravityQueryClient<Channel>,
     gravity_contract_address: EthAddress,
     eth_gas_price_multiplier: f32,

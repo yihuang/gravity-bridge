@@ -1,10 +1,10 @@
 mod batches;
+pub mod config;
 mod ethereum_events;
 mod gravity_contract_errors;
 mod logic_call;
 mod signatures;
 mod valsets;
-pub mod config;
 
 use crate::error::GravityError;
 use ethers::prelude::*;

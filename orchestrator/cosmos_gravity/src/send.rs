@@ -25,13 +25,13 @@ pub const TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Send a transaction updating the eth address for the sending
 /// Cosmos address. The sending Cosmos address should be a validator
-pub async fn update_gravity_delegate_addresses(
+pub async fn update_gravity_delegate_addresses<S: Signer + 'static>(
     contact: &Contact,
     delegate_eth_address: EthAddress,
     delegate_cosmos_address: Address,
     cosmos_key: CosmosPrivateKey,
     cosmos_granter: Option<String>,
-    ethereum_wallet: LocalWallet,
+    ethereum_wallet: S,
     gas_price: (f64, String),
     gas_adjustment: f64,
 ) -> Result<TxResponse, GravityError> {
@@ -59,7 +59,10 @@ pub async fn update_gravity_delegate_addresses(
     Message::encode(&eth_sign_msg, &mut data).expect("encoding failed");
 
     let data_hash = keccak256(data);
-    let eth_signature = ethereum_wallet.sign_message(data_hash).await?;
+    let eth_signature = ethereum_wallet
+        .sign_message(data_hash)
+        .await
+        .map_err(|e| GravityError::EthersWalletError(Box::new(e)))?;
     let msg = proto::MsgDelegateKeys {
         validator_address: our_valoper_address.to_string(),
         orchestrator_address: delegate_cosmos_address.to_string(),
@@ -68,7 +71,15 @@ pub async fn update_gravity_delegate_addresses(
     };
     let msg = Msg::new("/gravity.v1.MsgDelegateKeys", msg);
 
-    send_messages(contact, cosmos_key, cosmos_granter, gas_price, vec![msg], gas_adjustment).await
+    send_messages(
+        contact,
+        cosmos_key,
+        cosmos_granter,
+        gas_price,
+        vec![msg],
+        gas_adjustment,
+    )
+    .await
 }
 
 /// Sends tokens from Cosmos to Ethereum. These tokens will not be sent immediately instead
@@ -101,7 +112,15 @@ pub async fn send_to_eth(
         bridge_fee: Some(bridge_fee.clone().into()),
     };
     let msg = Msg::new("/gravity.v1.MsgSendToEthereum", msg);
-    send_messages(contact, cosmos_key, cosmos_granter, gas_price, vec![msg], gas_adjustment).await
+    send_messages(
+        contact,
+        cosmos_key,
+        cosmos_granter,
+        gas_price,
+        vec![msg],
+        gas_adjustment,
+    )
+    .await
 }
 
 pub async fn send_request_batch_tx(
@@ -118,7 +137,15 @@ pub async fn send_request_batch_tx(
         denom,
     };
     let msg = Msg::new("/gravity.v1.MsgRequestBatchTx", msg_request_batch);
-    send_messages(contact, cosmos_key, cosmos_granter, gas_price, vec![msg], gas_adjustment).await
+    send_messages(
+        contact,
+        cosmos_key,
+        cosmos_granter,
+        gas_price,
+        vec![msg],
+        gas_adjustment,
+    )
+    .await
 }
 
 pub async fn send_messages(
