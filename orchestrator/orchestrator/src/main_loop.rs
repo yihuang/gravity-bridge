@@ -156,6 +156,7 @@ pub async fn eth_oracle_main_loop<S: Signer + 'static, CS: CosmosSigner>(
     info!("Oracle resync complete, Oracle now operational");
     let mut grpc_client = grpc_client;
     let mut loop_count: u32 = 0;
+    let mut error_count: u32 = 0;
 
     loop {
         let (async_resp, _) = tokio::join!(
@@ -238,6 +239,24 @@ pub async fn eth_oracle_main_loop<S: Signer + 'static, CS: CosmosSigner>(
                         ) = e
                         {
                             delay_for(Duration::from_secs(10)).await;
+                            error_count += 1;
+
+                            if error_count == 10 {
+                                error!("Too many error, oracle resync is needed");
+                                // For some reason the oracle can be out of sync
+                                // We need to replay all block to find the latest checked block
+                                last_checked_block = get_last_checked_block(
+                                    grpc_client.clone(),
+                                    our_cosmos_address,
+                                    gravity_contract_address,
+                                    eth_client.clone(),
+                                    blocks_to_search,
+                                )
+                                .await;
+
+                                error_count = 0;
+                                info!("Oracle resync complete, start at {:?}", last_checked_block);
+                            }
                         }
                     }
                 }
